@@ -1,0 +1,28 @@
+# --- Rust / Anchor ---
+target/
+**/target/
+Cargo.lock
+
+# --- Solana ---
+.deploy/
+test-ledger/
+.keypairs/
+*.json
+
+# --- OS ---
+.DS_Store
+
+# --- Editor ---
+.vscode/
+.idea/
+
+# --- Node / accidental ---
+node_modules/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
+
+# --- Env ---
+.env
+.env.*
+

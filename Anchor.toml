@@ -1,0 +1,19 @@
+[features]
+resolution = true
+skip-lint = false
+
+[programs.devnet]
+solscope = "8YWM8AvPVQySTatRagWommQvNrWcBBFJWNSXC2kZgv6S"
+
+[registry]
+url = "https://api.apr.dev"
+
+[toolchain]
+anchor_version = "0.30.0"
+
+[provider]
+cluster = "devnet"
+wallet = "~/.config/solana/id.json"
+
+[build]
+target = "sbf"

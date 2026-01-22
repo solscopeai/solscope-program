@@ -7,7 +7,6 @@ pub enum SolscopeError {
     /* ======================================================
      * Vault & Balance Errors
      * ====================================================== */
-
     #[msg("Invalid vault account")]
     InvalidVault,
 
@@ -20,7 +19,6 @@ pub enum SolscopeError {
     /* ======================================================
      * Bot Identity & State Errors
      * ====================================================== */
-
     #[msg("Bot ID hash mismatch")]
     BotIdMismatch,
 
@@ -33,7 +31,9 @@ pub enum SolscopeError {
     /* ======================================================
      * Generic / Safety
      * ====================================================== */
-
     #[msg("Unauthorized operation")]
     Unauthorized,
+
+    #[msg("Slippage exceeded minimum output")]
+    SlippageExceeded,
 }

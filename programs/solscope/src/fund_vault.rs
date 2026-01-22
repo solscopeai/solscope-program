@@ -36,16 +36,12 @@ pub struct FundVault<'info> {
         ],
         bump
     )]
-    pub vault: SystemAccount<'info>,
+    pub vault: AccountInfo<'info>,
 
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(
-    ctx: Context<FundVault>,
-    bot_id_hash: [u8; 32],
-    amount: u64,
-) -> Result<()> {
+pub fn handler(ctx: Context<FundVault>, bot_id_hash: [u8; 32], amount: u64) -> Result<()> {
     require!(amount > 0, SolscopeError::InvalidAmount);
 
     // extra safety: bot_id must match + not paused
@@ -53,10 +49,7 @@ pub fn handler(
         ctx.accounts.bot_meta.bot_id_hash == bot_id_hash,
         SolscopeError::BotIdMismatch
     );
-    require!(
-        !ctx.accounts.bot_meta.paused,
-        SolscopeError::BotPaused
-    );
+    require!(!ctx.accounts.bot_meta.paused, SolscopeError::BotPaused);
 
     let cpi_ctx = CpiContext::new(
         ctx.accounts.system_program.to_account_info(),

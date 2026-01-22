@@ -37,15 +37,12 @@ pub struct RegisterBot<'info> {
         ],
         bump
     )]
-    pub vault: SystemAccount<'info>,
+    pub vault: AccountInfo<'info>,
 
     pub system_program: Program<'info, System>,
 }
 
-pub fn handler(
-    ctx: Context<RegisterBot>,
-    bot_id_hash: [u8; 32],
-) -> Result<()> {
+pub fn handler(ctx: Context<RegisterBot>, bot_id_hash: [u8; 32]) -> Result<()> {
     let bot_meta = &mut ctx.accounts.bot_meta;
 
     bot_meta.owner = ctx.accounts.owner.key();

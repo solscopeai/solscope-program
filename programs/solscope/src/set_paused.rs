@@ -1,7 +1,7 @@
 // programs/solscope/src/set_paused.rs
 
 use anchor_lang::prelude::*;
-use crate::{state::BotMeta, errors::SolscopeError};
+use crate::state::BotMeta;
 
 #[derive(Accounts)]
 #[instruction(bot_id_hash: [u8; 32])]
@@ -23,3 +23,4 @@ pub fn handler(ctx: Context<SetPaused>, _bot_id_hash: [u8; 32], paused: bool) ->
     ctx.accounts.bot_meta.paused = paused;
     Ok(())
 }
+

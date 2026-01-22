@@ -33,7 +33,7 @@ pub struct AssertVault<'info> {
         ],
         bump
     )]
-    pub vault: SystemAccount<'info>,
+    pub vault: AccountInfo<'info>,
 }
 
 pub fn handler(ctx: Context<AssertVault>, bot_id_hash: [u8; 32]) -> Result<()> {
@@ -44,10 +44,7 @@ pub fn handler(ctx: Context<AssertVault>, bot_id_hash: [u8; 32]) -> Result<()> {
     );
 
     // emergency pause
-    require!(
-        !ctx.accounts.bot_meta.paused,
-        SolscopeError::BotPaused
-    );
+    require!(!ctx.accounts.bot_meta.paused, SolscopeError::BotPaused);
 
     // optional: ensure stored bump matches derived bump
     require!(

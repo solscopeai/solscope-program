@@ -10,13 +10,13 @@ use std::str::FromStr;
 
 use anchor_spl::{
     associated_token::AssociatedToken,
-    token::{self, CloseAccount, Mint, SyncNative, Token, TokenAccount},
+    token::{self, CloseAccount, InitializeAccount, Mint, SyncNative, Token, TokenAccount},
 };
+use spl_token::native_mint;
 
 use crate::{errors::SolscopeError, state::BotMeta};
 
 pub const SIDE_BUY: u8 = 0;
-pub const SIDE_SELL: u8 = 1;
 
 /* ======================================================
  * Helpers
@@ -29,7 +29,6 @@ fn raydium_amm_program() -> Pubkey {
 #[derive(Accounts)]
 #[instruction(bot_id_hash: [u8; 32])]
 pub struct ExecuteTrade<'info> {
-    /// Bot owner (payer for ATA creation)
     #[account(mut)]
     pub owner: Signer<'info>,
 
@@ -41,7 +40,7 @@ pub struct ExecuteTrade<'info> {
     )]
     pub bot_meta: Account<'info, BotMeta>,
 
-    /// CHECK: Vault PDA (system-owned, SOL-only)
+    /// CHECK: Vault PDA (SOL only)
     #[account(
         mut,
         seeds = [b"vault", owner.key().as_ref(), &bot_id_hash],
@@ -49,7 +48,7 @@ pub struct ExecuteTrade<'info> {
     )]
     pub vault: AccountInfo<'info>,
 
-    /// Token being purchased
+    /// Output token mint
     pub mint: Account<'info, Mint>,
 
     /// Vault ATA for output token
@@ -61,70 +60,46 @@ pub struct ExecuteTrade<'info> {
     )]
     pub vault_ata: Account<'info, TokenAccount>,
 
-    /// CHECK: Temporary wSOL account owned by vault
+    /// CHECK: Native SOL mint (special-cased; not an initialized Mint account)
+    #[account(address = native_mint::id())]
+    pub native_mint: UncheckedAccount<'info>,
+
+    /// CHECK: Temporary wSOL account (must be system-owned before init)
     #[account(mut)]
     pub vault_wsol: AccountInfo<'info>,
 
-    /* =========================
-     * Raydium AMM Accounts
-     * ========================= */
-    /// CHECK: Raydium AMM program
+    /* ========== Raydium Accounts ========== */
     #[account(address = raydium_amm_program())]
     pub amm_program: AccountInfo<'info>,
 
-    /// CHECK: AMM state
     #[account(mut)]
     pub amm: AccountInfo<'info>,
-
-    /// CHECK: AMM authority
     pub amm_authority: AccountInfo<'info>,
-
-    /// CHECK: AMM open orders
     #[account(mut)]
     pub amm_open_orders: AccountInfo<'info>,
-
-    /// CHECK: AMM target orders
     #[account(mut)]
     pub amm_target_orders: AccountInfo<'info>,
-
-    /// CHECK: Pool coin (wSOL) vault
     #[account(mut)]
     pub pool_coin_token_account: AccountInfo<'info>,
-
-    /// CHECK: Pool pc (token) vault
     #[account(mut)]
     pub pool_pc_token_account: AccountInfo<'info>,
-
-    /// CHECK: Serum market
     pub serum_market: AccountInfo<'info>,
-
-    /// CHECK: Serum bids
     #[account(mut)]
     pub serum_bids: AccountInfo<'info>,
-
-    /// CHECK: Serum asks
     #[account(mut)]
     pub serum_asks: AccountInfo<'info>,
-
-    /// CHECK: Serum event queue
     #[account(mut)]
     pub serum_event_queue: AccountInfo<'info>,
-
-    /// CHECK: Serum coin vault
     #[account(mut)]
     pub serum_coin_vault: AccountInfo<'info>,
-
-    /// CHECK: Serum pc vault
     #[account(mut)]
     pub serum_pc_vault: AccountInfo<'info>,
-
-    /// CHECK: Serum vault signer
     pub serum_vault_signer: AccountInfo<'info>,
 
-    /* ========================= */
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
 }
 
 pub fn handler(
@@ -142,9 +117,13 @@ pub fn handler(
     );
     require!(!ctx.accounts.bot_meta.paused, SolscopeError::BotPaused);
 
-    /* =========================
-     * PDA signer seeds
-     * ========================= */
+    // vault_wsol must be fresh/uninitialized before we create+init it
+    require!(
+        ctx.accounts.vault_wsol.owner == &System::id(),
+        SolscopeError::InvalidVault
+    );
+
+    /* ================= PDA signer ================= */
     let vault_seeds: &[&[u8]] = &[
         b"vault",
         ctx.accounts.owner.key.as_ref(),
@@ -153,15 +132,12 @@ pub fn handler(
     ];
     let signer_seeds = &[vault_seeds];
 
-    /* =========================
-     * Create + fund wSOL account
-     * ========================= */
-    let rent = Rent::get()?;
+    /* ================= Create wSOL account ================= */
     let lamports = amount_in
-        .checked_add(rent.minimum_balance(TokenAccount::LEN))
+        .checked_add(ctx.accounts.rent.minimum_balance(TokenAccount::LEN))
         .unwrap();
 
-    let create_wsol_ix = system_instruction::create_account(
+    let create_ix = system_instruction::create_account(
         ctx.accounts.vault.key,
         ctx.accounts.vault_wsol.key,
         lamports,
@@ -170,7 +146,7 @@ pub fn handler(
     );
 
     invoke_signed(
-        &create_wsol_ix,
+        &create_ix,
         &[
             ctx.accounts.vault.to_account_info(),
             ctx.accounts.vault_wsol.to_account_info(),
@@ -179,6 +155,18 @@ pub fn handler(
         signer_seeds,
     )?;
 
+    /* ================= Initialize wSOL token account ================= */
+    token::initialize_account(CpiContext::new(
+        ctx.accounts.token_program.to_account_info(),
+        InitializeAccount {
+            account: ctx.accounts.vault_wsol.to_account_info(),
+            mint: ctx.accounts.native_mint.to_account_info(),
+            authority: ctx.accounts.vault.to_account_info(),
+            rent: ctx.accounts.rent.to_account_info(),
+        },
+    ))?;
+
+    /* ================= Sync native ================= */
     token::sync_native(CpiContext::new(
         ctx.accounts.token_program.to_account_info(),
         SyncNative {
@@ -186,9 +174,7 @@ pub fn handler(
         },
     ))?;
 
-    /* =========================
-     * Raydium swap CPI
-     * ========================= */
+    /* ================= Raydium swap ================= */
     let ix = Instruction {
         program_id: ctx.accounts.amm_program.key(),
         accounts: vec![
@@ -207,16 +193,14 @@ pub fn handler(
             AccountMeta::new(*ctx.accounts.serum_coin_vault.key, false),
             AccountMeta::new(*ctx.accounts.serum_pc_vault.key, false),
             AccountMeta::new_readonly(*ctx.accounts.serum_vault_signer.key, false),
-            AccountMeta::new_readonly(token::ID, false),
+            AccountMeta::new_readonly(ctx.accounts.token_program.key(), false),
         ],
         data: raydium_swap_data(amount_in, min_out),
     };
 
     invoke_signed(&ix, &ctx.accounts.to_account_infos(), signer_seeds)?;
 
-    /* =========================
-     * Close wSOL (refund rent)
-     * ========================= */
+    /* ================= Close wSOL ================= */
     token::close_account(CpiContext::new_with_signer(
         ctx.accounts.token_program.to_account_info(),
         CloseAccount {
@@ -230,12 +214,9 @@ pub fn handler(
     Ok(())
 }
 
-/* ======================================================
- * Raydium instruction data helper
- * ====================================================== */
 fn raydium_swap_data(amount_in: u64, min_out: u64) -> Vec<u8> {
-    let mut data = Vec::with_capacity(1 + 8 + 8);
-    data.push(9); // Raydium v4 SwapBaseIn
+    let mut data = Vec::with_capacity(17);
+    data.push(9); // SwapBaseIn
     data.extend_from_slice(&amount_in.to_le_bytes());
     data.extend_from_slice(&min_out.to_le_bytes());
     data
